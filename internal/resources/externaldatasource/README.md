@@ -229,15 +229,17 @@ that orphan automatically. Use server audit records and independent operation
 ownership evidence for manual recovery. Token expiry limits the credential's useful
 life but does not remove its secret object. Back up state before import or rollback.
 
-### Version and release gates
+### Provider compatibility and live verification
 
 This feature adds provider fields and no YDB protocol/server changes. New IAM
 configuration requires a provider release containing this schema. Before downgrading
 providers, preserve backups and intentionally remove or transfer management of new
 IAM resources; restore compatible configuration and state. An old provider is not
-expected to accept arbitrary new IAM state. Legacy-only old→new→old state testing
-and server current/minimum, rolling mixed-version, upgrade and downgrade scenarios
-remain release gates until actually executed.
+expected to accept arbitrary new IAM state. Legacy-only old→new→old state is
+covered by the local `TestLocalTerraformYDBLegacyProviderUpgradeDowngrade` when
+an explicit baseline binary is supplied. This changes only Go providers using
+existing SQL/CP APIs: no YDB or YDB CP upgrade, rolling deployment, mixed-version
+server exercise or server restart is required to deploy this feature.
 
 The local tests exercise real Terraform 1.5.7 state/plan semantics, real SDK query
 parameter wiring against fake gRPC, cancellation, unknown replies, and process kill.
@@ -247,6 +249,9 @@ set `TF_ACC=1`, `YDB_ACC_IAM_LIVE=1`, `YDB_ACC_CONNECTION_STRING`, `YDB_ACC_TOKE
 `YDB_ACC_IAM_TARGET_DATABASE_ID`, `YDB_ACC_IAM_SERVICE_ACCOUNT_ID`,
 `YDB_ACC_IAM_TARGET_LOCATION`, and `YDB_ACC_IAM_TARGET_CLOUD_ID` in a dedicated
 preconfigured environment. It checks the resolved cloud ID and secret absence.
-It does not print or place the token in HCL. Run the full wrapper acceptance gate
-with uncached queries, runtime restart, token expiration/fresh update, least-privilege
-negative cases, supported server versions and provider rollback before release.
+It does not print or place the token in HCL. Verify the wrapper on the existing
+deployment: delegation and EDS Create, temporary-secret DROP followed by a fresh
+query, fresh-token Update and cleanup, and exact-pair Revoke/destroy. Include
+least-privilege caller/runtime checks and provider state rollback. Runtime restart
+or server rolling-deployment exercises are optional extra validation, not required
+deployment steps or release gates; they require separate authorization.
