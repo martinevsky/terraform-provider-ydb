@@ -34,22 +34,23 @@ import (
 const wireToken = "synthetic-caller-'\\-token"
 
 type wireDB struct {
-	mu              sync.Mutex
-	addr            string
-	secrets         map[string]bool
-	exists          bool
-	properties      map[string]string
-	queries         []string
-	parameterOK     bool
-	expectedToken   string
-	loseReply       string
-	failDrop        bool
-	blockMutation   bool
-	mutationEntered chan struct{}
-	describeStatus  Ydb.StatusIds_StatusCode
-	listStatus      Ydb.StatusIds_StatusCode
-	listPaths       []string
-	pathEntryType   Ydb_Scheme.Entry_Type
+	allowLegacySecret bool
+	mu                sync.Mutex
+	addr              string
+	secrets           map[string]bool
+	exists            bool
+	properties        map[string]string
+	queries           []string
+	parameterOK       bool
+	expectedToken     string
+	loseReply         string
+	failDrop          bool
+	blockMutation     bool
+	mutationEntered   chan struct{}
+	describeStatus    Ydb.StatusIds_StatusCode
+	listStatus        Ydb.StatusIds_StatusCode
+	listPaths         []string
+	pathEntryType     Ydb_Scheme.Entry_Type
 }
 
 func newWireDB(t *testing.T) *wireDB {
@@ -119,7 +120,8 @@ func (s *wireQuery) ExecuteQuery(req *Ydb_Query.ExecuteQueryRequest, stream quer
 	switch {
 	case strings.Contains(q, "CREATE SECRET"):
 		value := req.Parameters["$value"]
-		if value == nil || value.GetType().GetTypeId() != Ydb.Type_UTF8 || value.GetValue().GetTextValue() != f.expectedToken {
+		legacy := f.allowLegacySecret && value == nil && strings.Contains(q, "value = 'legacy-public-fixture'")
+		if !legacy && (value == nil || value.GetType().GetTypeId() != Ydb.Type_UTF8 || value.GetValue().GetTextValue() != f.expectedToken) {
 			f.parameterOK = false
 			code = Ydb.StatusIds_BAD_REQUEST
 			break
@@ -157,7 +159,7 @@ func (s *wireQuery) ExecuteQuery(req *Ydb_Query.ExecuteQueryRequest, stream quer
 		for _, kv := range wireProperty.FindAllStringSubmatch(q, -1) {
 			f.properties[kv[1]] = kv[2]
 		}
-		if f.properties["RESOURCE_ID"] == "" {
+		if f.properties["AUTH_METHOD"] == "IAM" && f.properties["RESOURCE_ID"] == "" {
 			f.properties["RESOURCE_ID"] = "resolved-target-cloud"
 		}
 	}
