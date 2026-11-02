@@ -7,7 +7,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 
 	"github.com/ydb-platform/terraform-provider-ydb/internal/helpers"
-	tbl "github.com/ydb-platform/terraform-provider-ydb/internal/table"
 )
 
 func (h *Handler) Delete(ctx context.Context, d *schema.ResourceData, _ interface{}) diag.Diagnostics {
@@ -16,19 +15,19 @@ func (h *Handler) Delete(ctx context.Context, d *schema.ResourceData, _ interfac
 		return diag.FromErr(err)
 	}
 
-	db, err := tbl.CreateDBConnection(ctx, tbl.ClientParams{
-		DatabaseEndpoint: entity.PrepareFullYDBEndpoint(),
-		AuthCreds:        h.authCreds,
-	})
+	if diags := h.recoverCleanup(ctx, d, entity.PrepareFullYDBEndpoint()); diags.HasError() {
+		return diags
+	}
+	db, err := h.open(ctx, entity.PrepareFullYDBEndpoint())
 	if err != nil {
 		return diag.Errorf("failed to initialize client: %s", err)
 	}
-	defer func() { _ = db.Close(ctx) }()
+	defer h.close(ctx, db)
 
 	q := PrepareDropQuery(entity.GetFullEntityPath())
-	err = db.Query().Exec(ctx, q)
+	err = db.Exec(ctx, q)
 	if err != nil {
-		return diag.Errorf("failed to drop external data source %q: %s", entity.GetEntityPath(), err)
+		return diag.Errorf("failed to drop external data source %q: %s", entity.GetEntityPath(), safeStatus(err))
 	}
 
 	return nil

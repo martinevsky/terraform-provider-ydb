@@ -9,7 +9,6 @@ import (
 	ydb "github.com/ydb-platform/ydb-go-sdk/v3"
 
 	"github.com/ydb-platform/terraform-provider-ydb/internal/helpers"
-	tbl "github.com/ydb-platform/terraform-provider-ydb/internal/table"
 )
 
 func (h *Handler) Read(ctx context.Context, d *schema.ResourceData, _ interface{}) diag.Diagnostics {
@@ -42,22 +41,22 @@ func (h *Handler) DataSourceRead(ctx context.Context, d *schema.ResourceData, _ 
 }
 
 func (h *Handler) readExternalDataSource(ctx context.Context, d *schema.ResourceData, entity *helpers.YDBEntity) diag.Diagnostics {
-	db, err := tbl.CreateDBConnection(ctx, tbl.ClientParams{
-		DatabaseEndpoint: entity.PrepareFullYDBEndpoint(),
-		AuthCreds:        h.authCreds,
-	})
-	if err != nil {
-		return diag.Errorf("failed to initialize client: %s", err)
+	if diags := h.recoverCleanup(ctx, d, entity.PrepareFullYDBEndpoint()); diags.HasError() {
+		return diags
 	}
-	defer func() { _ = db.Close(ctx) }()
-
-	desc, err := db.Table().DescribeExternalDataSource(ctx, entity.GetFullEntityPath())
+	db, err := h.open(ctx, entity.PrepareFullYDBEndpoint())
 	if err != nil {
-		if ydb.IsOperationErrorSchemeError(err) {
+		return diag.Errorf("failed to initialize client: %s", safeStatus(err))
+	}
+	defer h.close(ctx, db)
+
+	desc, err := db.Describe(ctx, entity.GetFullEntityPath())
+	if err != nil {
+		if ydb.IsOperationErrorNotFoundError(err) || (d.Get("auth_method") != "IAM" && ydb.IsOperationErrorSchemeError(err)) {
 			d.SetId("")
 			return nil
 		}
-		return diag.Errorf("failed to describe external data source %q: %s", entity.GetEntityPath(), err)
+		return diag.Errorf("failed to describe external data source %q: %s", entity.GetEntityPath(), safeStatus(err))
 	}
 
 	return diag.FromErr(flattenDescription(d, entity, desc.Properties, desc.SourceType, desc.Location))
