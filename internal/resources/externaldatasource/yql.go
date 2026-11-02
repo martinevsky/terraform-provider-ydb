@@ -47,8 +47,13 @@ func appendWithClause(buf []byte, params []withParam) []byte {
 }
 
 func PrepareDataSourceQuery(fullPath string, r *Resource) string {
+	return prepareDataSourceQuery(fullPath, r, "CREATE OR REPLACE")
+}
+
+func prepareDataSourceQuery(fullPath string, r *Resource, operation string) string {
 	buf := make([]byte, 0, 512)
-	buf = append(buf, "CREATE OR REPLACE EXTERNAL DATA SOURCE `"...)
+	buf = append(buf, operation...)
+	buf = append(buf, " EXTERNAL DATA SOURCE `"...)
 	buf = append(buf, helpers.EscapeYQLIdentifier(fullPath)...)
 	buf = append(buf, '`')
 	buf = appendWithClause(buf, collectWithParams(r))
@@ -69,9 +74,8 @@ func escapeYQLDoubleString(s string) string {
 
 // IAM Create must not replace an existing EDS, even if its description matches.
 func PrepareCreateDataSourceQuery(fullPath string, r *Resource) string {
-	q := PrepareDataSourceQuery(fullPath, r)
 	if r.strAttr("auth_method") == "IAM" {
-		return strings.Replace(q, "CREATE OR REPLACE ", "CREATE ", 1)
+		return prepareDataSourceQuery(fullPath, r, "CREATE")
 	}
-	return q
+	return PrepareDataSourceQuery(fullPath, r)
 }
