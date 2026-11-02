@@ -46,6 +46,10 @@ type wireDB struct {
 	failDrop        bool
 	blockMutation   bool
 	mutationEntered chan struct{}
+	describeStatus  Ydb.StatusIds_StatusCode
+	listStatus      Ydb.StatusIds_StatusCode
+	listPaths       []string
+	pathEntryType   Ydb_Scheme.Entry_Type
 }
 
 func newWireDB(t *testing.T) *wireDB {
@@ -173,8 +177,12 @@ func (s *wireTable) DescribeExternalDataSource(context.Context, *Ydb_Table.Descr
 	f := s.f
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.exists {
-		return &Ydb_Table.DescribeExternalDataSourceResponse{Operation: &Ydb_Operations.Operation{Ready: true, Status: Ydb.StatusIds_NOT_FOUND}}, nil
+	if !f.exists || f.describeStatus != Ydb.StatusIds_STATUS_CODE_UNSPECIFIED {
+		code := f.describeStatus
+		if code == Ydb.StatusIds_STATUS_CODE_UNSPECIFIED {
+			code = Ydb.StatusIds_SCHEME_ERROR
+		}
+		return &Ydb_Table.DescribeExternalDataSourceResponse{Operation: &Ydb_Operations.Operation{Ready: true, Status: code}}, nil
 	}
 	src, loc := f.properties["SOURCE_TYPE"], f.properties["LOCATION"]
 	props := map[string]string{}
@@ -189,11 +197,22 @@ type wireScheme struct {
 	f *wireDB
 }
 
-func (s *wireScheme) ListDirectory(context.Context, *Ydb_Scheme.ListDirectoryRequest) (*Ydb_Scheme.ListDirectoryResponse, error) {
+func (s *wireScheme) ListDirectory(_ context.Context, req *Ydb_Scheme.ListDirectoryRequest) (*Ydb_Scheme.ListDirectoryResponse, error) {
 	f := s.f
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listPaths = append(f.listPaths, req.GetPath())
+	if f.listStatus != Ydb.StatusIds_STATUS_CODE_UNSPECIFIED {
+		return &Ydb_Scheme.ListDirectoryResponse{Operation: &Ydb_Operations.Operation{Ready: true, Status: f.listStatus}}, nil
+	}
 	children := []*Ydb_Scheme.Entry{}
+	if f.exists {
+		entryType := f.pathEntryType
+		if entryType == Ydb_Scheme.Entry_TYPE_UNSPECIFIED {
+			entryType = Ydb_Scheme.Entry_EXTERNAL_DATA_SOURCE
+		}
+		children = append(children, &Ydb_Scheme.Entry{Name: "eds", Type: entryType})
+	}
 	for p := range f.secrets {
 		children = append(children, &Ydb_Scheme.Entry{Name: path.Base(p)})
 	}
@@ -296,5 +315,55 @@ func TestYDBIAMCreateCollisionPreservesForeignEDS(t *testing.T) {
 	for _, q := range f.queries {
 		require.NotContains(t, q, "CREATE OR REPLACE EXTERNAL DATA SOURCE")
 		require.NotContains(t, q, "DROP EXTERNAL DATA SOURCE")
+	}
+}
+
+// YDB's real Describe RPC maps both missing paths and generic scheme errors to
+// SCHEME_ERROR. Only a successful exact-path absence check may remove IAM state.
+func TestYDBIAMReadSchemeErrorExactAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name, auth                   string
+		exists                       bool
+		describeStatus, listStatus   Ydb.StatusIds_StatusCode
+		entryType                    Ydb_Scheme.Entry_Type
+		wantError, wantID, wantProbe bool
+	}{
+		{name: "missing IAM EDS", auth: "IAM", wantProbe: true},
+		{name: "ambiguous scheme error with existing path", auth: "IAM", exists: true, describeStatus: Ydb.StatusIds_SCHEME_ERROR, wantError: true, wantID: true, wantProbe: true},
+		{name: "scheme error with wrong-type path", auth: "IAM", exists: true, describeStatus: Ydb.StatusIds_SCHEME_ERROR, entryType: Ydb_Scheme.Entry_TABLE, wantError: true, wantID: true, wantProbe: true},
+		{name: "missing path but listing denied", auth: "IAM", listStatus: Ydb.StatusIds_UNAUTHORIZED, wantError: true, wantID: true, wantProbe: true},
+		{name: "Describe denied", auth: "IAM", describeStatus: Ydb.StatusIds_UNAUTHORIZED, wantError: true, wantID: true},
+		{name: "legacy scheme absence behavior", auth: "NONE", listStatus: Ydb.StatusIds_UNAUTHORIZED},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWireDB(t)
+			f.exists = tc.exists
+			f.describeStatus = tc.describeStatus
+			f.listStatus = tc.listStatus
+			f.pathEntryType = tc.entryType
+			cfg := iamConfig()
+			cfg["auth_method"] = tc.auth
+			cfg["connection_string"] = fmt.Sprintf("grpc://%s/?database=/owner", f.addr)
+			d := schema.TestResourceDataRaw(t, ResourceSchema(), cfg)
+			id := cfg["connection_string"].(string) + "?path=eds"
+			d.SetId(id)
+			ctx, cancel := context.WithTimeout(context.Background(), 3_000_000_000)
+			defer cancel()
+			diags := ResourceReadFunc(wireCallback)(ctx, d, nil)
+			require.Equal(t, tc.wantError, diags.HasError(), "%v", diags)
+			if tc.wantID {
+				require.Equal(t, id, d.Id())
+			} else {
+				require.Empty(t, d.Id())
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			require.Empty(t, f.queries, "Read must not issue bootstrap or EDS mutations")
+			if tc.wantProbe {
+				require.Equal(t, []string{"/owner"}, f.listPaths)
+			} else {
+				require.Empty(t, f.listPaths)
+			}
+		})
 	}
 }

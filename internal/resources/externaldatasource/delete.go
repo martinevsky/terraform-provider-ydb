@@ -20,7 +20,7 @@ func (h *Handler) Delete(ctx context.Context, d *schema.ResourceData, _ interfac
 	}
 	db, err := h.open(ctx, entity.PrepareFullYDBEndpoint())
 	if err != nil {
-		return diag.Errorf("failed to initialize client: %s", err)
+		return diag.Errorf("failed to initialize client: %s", safeStatus(err))
 	}
 	defer h.close(ctx, db)
 

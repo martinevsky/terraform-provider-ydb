@@ -16,7 +16,7 @@ import (
 type backend interface {
 	Exec(context.Context, string, ...query.ExecuteOption) error
 	Describe(context.Context, string) (options.ExternalDataSourceDescription, error)
-	SecretAbsent(context.Context, string) (bool, error)
+	PathAbsent(context.Context, string) (bool, error)
 	Close(context.Context) error
 }
 type driverBackend struct{ *ydb.Driver }
@@ -31,7 +31,7 @@ func (b driverBackend) Describe(ctx context.Context, p string) (options.External
 	}
 	return *d, nil
 }
-func (b driverBackend) SecretAbsent(ctx context.Context, p string) (bool, error) {
+func (b driverBackend) PathAbsent(ctx context.Context, p string) (bool, error) {
 	// A successful listing distinguishes exact absence from permission/transport errors
 	// and from generic SCHEME_ERROR, which does not necessarily mean NotFound.
 	dir, err := b.Scheme().ListDirectory(ctx, path.Dir(p))

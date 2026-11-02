@@ -35,8 +35,8 @@ func (f *fakeBackend) Exec(ctx context.Context, q string, opts ...query.ExecuteO
 func (f *fakeBackend) Describe(context.Context, string) (options.ExternalDataSourceDescription, error) {
 	return f.desc, f.describeErr
 }
-func (f *fakeBackend) SecretAbsent(context.Context, string) (bool, error) { return f.absent, nil }
-func (f *fakeBackend) Close(context.Context) error                        { return nil }
+func (f *fakeBackend) PathAbsent(context.Context, string) (bool, error) { return f.absent, nil }
+func (f *fakeBackend) Close(context.Context) error                      { return nil }
 func bootstrapData(t *testing.T) *schema.ResourceData {
 	t.Helper()
 	s := flattenTestSchema()

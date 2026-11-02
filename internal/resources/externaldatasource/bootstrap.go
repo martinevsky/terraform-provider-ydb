@@ -125,7 +125,7 @@ func (h *Handler) cleanup(ctx context.Context, endpoint, p string) error {
 	}
 	// Lost DROP response and NotFound are safe only after exact absence is
 	// confirmed by a successful parent listing. Never infer it from SCHEME_ERROR.
-	absent, probeErr := b.SecretAbsent(cleanCtx, p)
+	absent, probeErr := b.PathAbsent(cleanCtx, p)
 	if probeErr == nil && absent {
 		return nil
 	}

@@ -56,6 +56,19 @@ func (h *Handler) readExternalDataSource(ctx context.Context, d *schema.Resource
 			d.SetId("")
 			return nil
 		}
+		if d.Get("auth_method") == "IAM" && ydb.IsOperationErrorSchemeError(err) {
+			// Describe maps both missing paths and other scheme failures to
+			// SCHEME_ERROR. Confirm this exact path is absent before forgetting
+			// IAM ownership; an existing/wrong-type object remains an error.
+			absent, probeErr := db.PathAbsent(ctx, entity.GetFullEntityPath())
+			if probeErr != nil {
+				return diag.Errorf("failed to reconcile external data source %q after %s: %s; identity retained", entity.GetEntityPath(), safeStatus(err), safeStatus(probeErr))
+			}
+			if absent {
+				d.SetId("")
+				return nil
+			}
+		}
 		return diag.Errorf("failed to describe external data source %q: %s", entity.GetEntityPath(), safeStatus(err))
 	}
 
