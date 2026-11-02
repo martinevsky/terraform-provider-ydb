@@ -57,20 +57,23 @@ func (h *Handler) readExternalDataSource(ctx context.Context, d *schema.Resource
 			return nil
 		}
 		if d.Get("auth_method") == "IAM" && ydb.IsOperationErrorSchemeError(err) {
-			// Describe maps both missing paths and other scheme failures to
-			// SCHEME_ERROR. Confirm this exact path is absent before forgetting
-			// IAM ownership; an existing/wrong-type object remains an error.
-			absent, probeErr := db.PathAbsent(ctx, entity.GetFullEntityPath())
-			if probeErr != nil {
-				return diag.Errorf("failed to reconcile external data source %q after %s: %s; identity retained", entity.GetEntityPath(), safeStatus(err), safeStatus(probeErr))
-			}
-			if absent {
-				d.SetId("")
-				return nil
-			}
+			return reconcileReadSchemeError(ctx, db, d, entity, err)
 		}
 		return diag.Errorf("failed to describe external data source %q: %s", entity.GetEntityPath(), safeStatus(err))
 	}
 
 	return diag.FromErr(flattenDescription(d, entity, desc.Properties, desc.SourceType, desc.Location))
+}
+
+// A scheme error can mean missing or wrong-type; forget ownership only after an exact absence check.
+func reconcileReadSchemeError(ctx context.Context, db backend, d *schema.ResourceData, entity *helpers.YDBEntity, describeErr error) diag.Diagnostics {
+	absent, err := db.PathAbsent(ctx, entity.GetFullEntityPath())
+	if err != nil {
+		return diag.Errorf("failed to reconcile external data source %q after %s: %s; identity retained", entity.GetEntityPath(), safeStatus(describeErr), safeStatus(err))
+	}
+	if absent {
+		d.SetId("")
+		return nil
+	}
+	return diag.Errorf("failed to describe external data source %q: %s", entity.GetEntityPath(), safeStatus(describeErr))
 }

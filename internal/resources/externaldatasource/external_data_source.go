@@ -94,7 +94,9 @@ func resourceSchemaToResource(d *schema.ResourceData) (*Resource, error) {
 		DatabaseEndpoint: databaseEndpoint,
 		Values:           vals,
 	}
-	if v, ok := d.GetOkExists("use_tls"); ok {
+	// Direct SDK callers may have no raw config; preserve their explicit false value.
+	//nolint:staticcheck // GetOk cannot distinguish explicit false from absence.
+	if v, ok := d.GetOkExists("use_tls"); ok && (d.GetRawConfig().IsNull() || Configured(d.GetRawConfig(), "use_tls")) {
 		b := v.(bool)
 		res.UseTLS = &b
 	}

@@ -2,9 +2,10 @@ package externaldatasource
 
 import (
 	"context"
+	"time"
+
 	"github.com/ydb-platform/terraform-provider-ydb/internal/resources"
 	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
-	"time"
 )
 
 // Handler implements resources.Handler and DataSourceRead for ydb_external_data_source.

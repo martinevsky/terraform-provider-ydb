@@ -13,7 +13,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/require"
-	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
 	discovery "github.com/ydb-platform/ydb-go-genproto/Ydb_Discovery_V1"
 	queryv1 "github.com/ydb-platform/ydb-go-genproto/Ydb_Query_V1"
 	scheme "github.com/ydb-platform/ydb-go-genproto/Ydb_Scheme_V1"
@@ -29,6 +28,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
 )
 
 const wireToken = "synthetic-caller-'\\-token"
@@ -67,6 +68,7 @@ func newWireDB(t *testing.T) *wireDB {
 	t.Cleanup(server.Stop)
 	return f
 }
+
 func wireOperation(m proto.Message) *Ydb_Operations.Operation {
 	a, _ := anypb.New(m)
 	return &Ydb_Operations.Operation{Ready: true, Status: Ydb.StatusIds_SUCCESS, Result: a}
@@ -91,9 +93,11 @@ type wireQuery struct {
 func (s *wireQuery) CreateSession(context.Context, *Ydb_Query.CreateSessionRequest) (*Ydb_Query.CreateSessionResponse, error) {
 	return &Ydb_Query.CreateSessionResponse{Status: Ydb.StatusIds_SUCCESS, SessionId: "ydb://session?node_id=1&id=test", NodeId: 1}, nil
 }
+
 func (s *wireQuery) DeleteSession(context.Context, *Ydb_Query.DeleteSessionRequest) (*Ydb_Query.DeleteSessionResponse, error) {
 	return &Ydb_Query.DeleteSessionResponse{Status: Ydb.StatusIds_SUCCESS}, nil
 }
+
 func (s *wireQuery) AttachSession(_ *Ydb_Query.AttachSessionRequest, stream queryv1.QueryService_AttachSessionServer) error {
 	if err := stream.Send(&Ydb_Query.SessionState{Status: Ydb.StatusIds_SUCCESS}); err != nil {
 		return err
@@ -102,8 +106,10 @@ func (s *wireQuery) AttachSession(_ *Ydb_Query.AttachSessionRequest, stream quer
 	return nil
 }
 
-var wireIdentifier = regexp.MustCompile("`([^`]+)`")
-var wireProperty = regexp.MustCompile(`([A-Z_]+) = "([^"]*)"`)
+var (
+	wireIdentifier = regexp.MustCompile("`([^`]+)`")
+	wireProperty   = regexp.MustCompile(`([A-Z_]+) = "([^"]*)"`)
+)
 
 func (s *wireQuery) ExecuteQuery(req *Ydb_Query.ExecuteQueryRequest, stream queryv1.QueryService_ExecuteQueryServer) error {
 	f := s.f
@@ -132,11 +138,12 @@ func (s *wireQuery) ExecuteQuery(req *Ydb_Query.ExecuteQueryRequest, stream quer
 			f.secrets[p] = true
 		}
 	case strings.HasPrefix(q, "DROP SECRET"):
-		if f.failDrop {
+		switch {
+		case f.failDrop:
 			code = Ydb.StatusIds_UNAUTHORIZED
-		} else if !f.secrets[p] {
+		case !f.secrets[p]:
 			code = Ydb.StatusIds_NOT_FOUND
-		} else {
+		default:
 			delete(f.secrets, p)
 		}
 	case strings.HasPrefix(q, "DROP EXTERNAL DATA SOURCE"):
@@ -220,9 +227,11 @@ func (s *wireScheme) ListDirectory(_ context.Context, req *Ydb_Scheme.ListDirect
 	}
 	return &Ydb_Scheme.ListDirectoryResponse{Operation: wireOperation(&Ydb_Scheme.ListDirectoryResult{Self: &Ydb_Scheme.Entry{Name: "owner"}, Children: children})}, nil
 }
+
 func wireCallback(context.Context) (auth.YdbCredentials, error) {
 	return auth.YdbCredentials{Token: wireToken}, nil
 }
+
 func TestYDBIAMBootstrapNetworkAdapter(t *testing.T) {
 	f := newWireDB(t)
 	cfg := iamConfig()
@@ -271,6 +280,7 @@ func TestYDBIAMBootstrapNetworkLostReply(t *testing.T) {
 		})
 	}
 }
+
 func TestYDBIAMBootstrapNetworkFreshCallerToken(t *testing.T) {
 	f := newWireDB(t)
 	cfg := iamConfig()

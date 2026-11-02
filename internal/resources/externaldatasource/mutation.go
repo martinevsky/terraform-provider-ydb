@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+
 	"github.com/ydb-platform/terraform-provider-ydb/internal/helpers"
 )
 
@@ -58,20 +59,7 @@ func (h *Handler) mutate(ctx context.Context, d *schema.ResourceData, kind mutat
 		}
 	}
 	mutate := func(p string) mutationResult {
-		vals := make(map[string]string, len(r.Values))
-		for k, v := range r.Values {
-			vals[k] = v
-		}
-		transient := *r
-		transient.Values = vals
-		if p != "" {
-			transient.Values["initial_token_secret_path"] = p
-		}
-		q := PrepareDataSourceQuery(fullPath, &transient)
-		if kind == createMutation {
-			q = PrepareCreateDataSourceQuery(fullPath, &transient)
-		}
-		return execMutation(ctx, b, q)
+		return mutateResource(ctx, b, r, fullPath, p, kind)
 	}
 	var result bootstrapResult
 	if iam && r.strAttr("iam_bootstrap_mode") != "EXISTING_SECRET" {
@@ -83,16 +71,7 @@ func (h *Handler) mutate(ctx context.Context, d *schema.ResourceData, kind mutat
 		h.reconcileUnknown(ctx, endpoint, fullPath)
 	}
 	if result.outcome != terminalSuccess {
-		if !iam {
-			return diag.Errorf("failed to mutate external data source: %s", safeStatus(result.err))
-		}
-		if kind == replaceMutation && result.owned && (result.cleanupErr != nil || result.outcome == unknownOutcome) {
-			_ = d.Set("pending_cleanup_path", result.path)
-			if result.outcome == unknownOutcome {
-				_ = d.Set("pending_iam_mutation", "UNKNOWN")
-			}
-		}
-		return bootstrapDiagnostics(result)
+		return mutationDiagnostics(d, kind, iam, result)
 	}
 	if kind == createMutation {
 		d.SetId(endpoint + "?path=" + r.Path)
@@ -115,4 +94,36 @@ func (h *Handler) mutate(ctx context.Context, d *schema.ResourceData, kind mutat
 		return append(diags, diag.Diagnostic{Severity: diag.Warning, Summary: "EDS mutation acknowledged; refresh required", Detail: "Describe failed: " + safeStatus(err) + ". The confirmed EDS identity is retained; retry refresh."})
 	}
 	return append(diags, diag.FromErr(flattenDescription(d, entity, desc.Properties, desc.SourceType, desc.Location))...)
+}
+
+func mutateResource(ctx context.Context, b backend, r *Resource, fullPath, secretPath string, kind mutationKind) mutationResult {
+	vals := make(map[string]string, len(r.Values))
+	for k, v := range r.Values {
+		vals[k] = v
+	}
+	transient := *r
+	transient.Values = vals
+	if secretPath != "" {
+		transient.Values["initial_token_secret_path"] = secretPath
+	}
+	q := PrepareDataSourceQuery(fullPath, &transient)
+	if kind == createMutation {
+		q = PrepareCreateDataSourceQuery(fullPath, &transient)
+	}
+	return execMutation(ctx, b, q)
+}
+
+func mutationDiagnostics(d *schema.ResourceData, kind mutationKind, iam bool, result bootstrapResult) diag.Diagnostics {
+	if !iam {
+		return diag.Errorf("failed to mutate external data source: %s", safeStatus(result.err))
+	}
+	if kind == replaceMutation {
+		if result.owned && (result.cleanupErr != nil || result.outcome == unknownOutcome) {
+			_ = d.Set("pending_cleanup_path", result.path)
+		}
+		if result.outcome == unknownOutcome {
+			_ = d.Set("pending_iam_mutation", "UNKNOWN")
+		}
+	}
+	return bootstrapDiagnostics(result)
 }

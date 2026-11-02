@@ -2,6 +2,7 @@ package externaldatasource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"time"
@@ -38,11 +39,16 @@ type bootstrapResult struct {
 	cleanupErr error
 }
 
+var errCallerTokenRequired = errors.New("caller IAM token required")
+
 // safeStatus deliberately excludes server issue strings, RPC messages and query
 // parameter dumps: those may echo a credential, even though SQL is parameterized.
 func safeStatus(err error) string {
 	if err == nil {
 		return "OK"
+	}
+	if errors.Is(err, errCallerTokenRequired) {
+		return errCallerTokenRequired.Error()
 	}
 	if e := ydb.OperationError(err); e != nil {
 		return fmt.Sprintf("YDB status %d", e.Code())
@@ -53,14 +59,15 @@ func safeStatus(err error) string {
 	if s, ok := status.FromError(err); ok {
 		return "RPC " + s.Code().String()
 	}
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		return "context cancelled"
 	}
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline exceeded"
 	}
 	return "request failed (details omitted to protect credentials)"
 }
+
 func classifyMutation(err error) mutationResult {
 	if err == nil {
 		return mutationResult{outcome: terminalSuccess}
@@ -76,15 +83,18 @@ func classifyMutation(err error) mutationResult {
 	}
 	return mutationResult{outcome: unknownOutcome, err: err}
 }
+
 func execMutation(ctx context.Context, b backend, q string, opts ...query.ExecuteOption) mutationResult {
 	if err := ctx.Err(); err != nil {
 		return mutationResult{outcome: notSubmitted, err: err}
 	}
 	return classifyMutation(b.Exec(ctx, q, opts...))
 }
+
 func isCollision(err error) bool {
 	return ydb.IsOperationErrorAlreadyExistsError(err) || status.Code(err) == codes.AlreadyExists
 }
+
 func (h *Handler) boundedContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	timeout := h.cleanupTimeout
 	if timeout <= 0 {
@@ -92,11 +102,13 @@ func (h *Handler) boundedContext(ctx context.Context) (context.Context, context.
 	}
 	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
+
 func (h *Handler) close(ctx context.Context, b backend) {
 	closeCtx, cancel := h.boundedContext(ctx)
 	defer cancel()
 	_ = b.Close(closeCtx)
 }
+
 func (h *Handler) freshBackend(ctx context.Context, endpoint string) (backend, error) {
 	creds := h.authCreds
 	if h.callerAuth != nil {
@@ -111,6 +123,7 @@ func (h *Handler) freshBackend(ctx context.Context, endpoint string) (backend, e
 	}
 	return openDriverBackend(ctx, endpoint, creds)
 }
+
 func (h *Handler) cleanup(ctx context.Context, endpoint, p string) error {
 	cleanCtx, cancel := h.boundedContext(ctx)
 	defer cancel()
@@ -131,6 +144,7 @@ func (h *Handler) cleanup(ctx context.Context, endpoint, p string) error {
 	}
 	return err
 }
+
 func (h *Handler) bootstrap(ctx context.Context, endpoint, root string, b backend, mutation func(string) mutationResult) bootstrapResult {
 	if err := ctx.Err(); err != nil {
 		return bootstrapResult{mutationResult: mutationResult{outcome: notSubmitted, err: err}}
@@ -144,7 +158,7 @@ func (h *Handler) bootstrap(ctx context.Context, endpoint, root string, b backen
 		}
 	}
 	if creds.Token == "" {
-		return bootstrapResult{mutationResult: mutationResult{outcome: notSubmitted, err: fmt.Errorf("caller IAM token required")}}
+		return bootstrapResult{mutationResult: mutationResult{outcome: notSubmitted, err: errCallerTokenRequired}}
 	}
 	var p string
 	for attempt := 0; attempt < 5; attempt++ {
@@ -176,12 +190,15 @@ func (h *Handler) bootstrap(ctx context.Context, endpoint, root string, b backen
 
 func (h *Handler) recoverCleanup(ctx context.Context, d *schema.ResourceData, endpoint string) diag.Diagnostics {
 	p, _ := d.Get("pending_cleanup_path").(string)
-	if p == "" {
-		return nil
-	}
 	uncertain, _ := d.Get("pending_iam_mutation").(string)
 	if uncertain != "" {
-		return diag.Errorf("IAM mutation outcome remains unknown; confirmed-owned bootstrap secret %q is preserved. Verify the server operation has stopped before manual recovery; do not drop a possibly in-use secret. See IAM bootstrap recovery documentation", p)
+		if p != "" {
+			return diag.Errorf("IAM mutation outcome remains unknown; confirmed-owned bootstrap secret %q is preserved. Verify the server operation has stopped before manual recovery; do not drop a possibly in-use secret. See IAM bootstrap recovery documentation", p)
+		}
+		return diag.Errorf("IAM mutation outcome remains unknown. Verify the server operation has stopped before manual recovery. See IAM bootstrap recovery documentation")
+	}
+	if p == "" {
+		return nil
 	}
 	if err := h.cleanup(ctx, endpoint, p); err != nil {
 		return diag.Errorf("cannot clean confirmed-owned bootstrap secret %q: %s; EDS identity and pending cleanup are retained", p, safeStatus(err))

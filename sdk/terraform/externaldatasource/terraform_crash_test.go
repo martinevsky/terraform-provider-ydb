@@ -28,7 +28,7 @@ func TestLocalTerraformYDBIAMCrashOrphan(t *testing.T) {
 	dir := t.TempDir()
 	plugins := filepath.Join(dir, "plugins")
 	bin := filepath.Join(plugins, "registry.terraform.io/example/test/0.0.1", runtime.GOOS+"_"+runtime.GOARCH, "terraform-provider-test_v0.0.1")
-	require.NoError(t, os.MkdirAll(filepath.Dir(bin), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Dir(bin), 0o700))
 	out, err := exec.Command("go", "build", "-o", bin, "./testdata/error-provider").CombinedOutput()
 	require.NoError(t, err, string(out))
 	pidfile := filepath.Join(dir, "provider.pid")
@@ -57,7 +57,7 @@ resource "test_eds" "example" {
  auth_method = "IAM"
  service_account_id = "runtime-sa"
 }
-`, f.addr)), 0600))
+`, f.addr)), 0o600))
 	result, err := run("init", "-plugin-dir="+plugins, "-no-color")
 	require.NoError(t, err, result)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

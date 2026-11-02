@@ -25,7 +25,7 @@ func resourceFromDiff(d *schema.ResourceDiff) *Resource {
 	}
 	vals["iam_bootstrap_mode"] = diffString(d, "iam_bootstrap_mode")
 	r := &Resource{Values: vals}
-	if v, ok := d.GetOkExists("use_tls"); ok {
+	if v, ok := d.GetOkExists("use_tls"); ok && (d.GetRawConfig().IsNull() || Configured(d.GetRawConfig(), "use_tls")) {
 		if b, ok := v.(bool); ok {
 			r.UseTLS = &b
 		}

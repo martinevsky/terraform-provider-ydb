@@ -210,16 +210,18 @@ provider makes a bounded Describe attempt but never treats an equal description
 as proof of Create ownership. An unconfirmed secret CREATE path is reported as
 **unconfirmed** and never automatically dropped. An acknowledged temporary secret
 is preserved while EDS mutation may still run. Unknown Update retains the previous
-EDS ID, `pending_cleanup_path`, and `pending_iam_mutation = "UNKNOWN"`; refresh
-blocks cleanup until an operator reconciles server execution. Unknown/failed Create
+EDS ID and `pending_iam_mutation = "UNKNOWN"`; CALLER_TOKEN also retains
+`pending_cleanup_path`. Refresh and further mutations are blocked until an operator
+reconciles server execution. Unknown/failed Create
 never invents an EDS identity merely to retain cleanup state.
 
 For an exact **confirmed-owned orphan** in diagnostics, first verify with the YDB
 operator that the submitted EDS request has terminated. Then remove that exact
 secret (`DROP SECRET` with proper identifier quoting), verify the intended EDS and
-its ownership, and import it if appropriate. For an unknown Update, back up state,
-finish exact-path manual recovery, then re-import the verified EDS to clear uncertain
-metadata and explicitly restore `CALLER_TOKEN` configuration. Never drop an
+its ownership, and import it if appropriate. For an unknown Update, back up state, verify the
+server operation has stopped and finish any exact-path manual recovery, then
+re-import the verified EDS to clear uncertain metadata and restore the intended
+bootstrap mode. Never drop an
 unconfirmed path without independent ownership evidence. Never sweep secrets by
 `__tf_iam_bootstrap_` prefix.
 

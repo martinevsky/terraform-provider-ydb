@@ -24,6 +24,7 @@ type driverBackend struct{ *ydb.Driver }
 func (b driverBackend) Exec(ctx context.Context, sql string, opts ...query.ExecuteOption) error {
 	return b.Query().Exec(ctx, sql, opts...)
 }
+
 func (b driverBackend) Describe(ctx context.Context, p string) (options.ExternalDataSourceDescription, error) {
 	d, err := b.Table().DescribeExternalDataSource(ctx, p)
 	if err != nil {
@@ -31,6 +32,7 @@ func (b driverBackend) Describe(ctx context.Context, p string) (options.External
 	}
 	return *d, nil
 }
+
 func (b driverBackend) PathAbsent(ctx context.Context, p string) (bool, error) {
 	// A successful listing distinguishes exact absence from permission/transport errors
 	// and from generic SCHEME_ERROR, which does not necessarily mean NotFound.
@@ -45,6 +47,7 @@ func (b driverBackend) PathAbsent(ctx context.Context, p string) (bool, error) {
 	}
 	return true, nil
 }
+
 func openDriverBackend(ctx context.Context, endpoint string, creds auth.YdbCredentials) (backend, error) {
 	db, err := tbl.CreateDBConnection(ctx, tbl.ClientParams{DatabaseEndpoint: endpoint, AuthCreds: creds})
 	if err != nil {
@@ -52,6 +55,7 @@ func openDriverBackend(ctx context.Context, endpoint string, creds auth.YdbCrede
 	}
 	return driverBackend{db}, nil
 }
+
 func (h *Handler) open(ctx context.Context, endpoint string) (backend, error) {
 	if h.openBackend != nil {
 		return h.openBackend(ctx, endpoint, h.authCreds)

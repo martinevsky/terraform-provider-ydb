@@ -2,19 +2,22 @@ package externaldatasource
 
 import (
 	"context"
+	"testing"
+
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func testResource() *schema.Resource {
 	return &schema.Resource{Schema: ResourceSchema(), CustomizeDiff: CustomizeDiff}
 }
+
 func iamConfig() map[string]interface{} {
 	return map[string]interface{}{"connection_string": "grpc://localhost:2136/?database=/owner", "path": "eds", "source_type": "Ydb", "location": "target:2135", "auth_method": "IAM", "service_account_id": "sa", "database_id": "target", "iam_bootstrap_mode": "CALLER_TOKEN"}
 }
+
 func TestIAMResourceSchemaAndDiff(t *testing.T) {
 	s := ResourceSchema()
 	for _, k := range []string{"iam_bootstrap_mode", "initial_token_secret_path", "resource_id", "pending_cleanup_path"} {
@@ -33,7 +36,10 @@ func TestIAMResourceSchemaAndDiff(t *testing.T) {
 		vals map[string]interface{}
 		bad  bool
 	}{
-		{"valid", nil, false}, {"unknown auth", map[string]interface{}{"auth_method": "74D93920-ED26-11E3-AC10-0800200C9A66"}, false}, {"unknown mode", map[string]interface{}{"iam_bootstrap_mode": "74D93920-ED26-11E3-AC10-0800200C9A66"}, false}, {"unknown", map[string]interface{}{"service_account_id": "74D93920-ED26-11E3-AC10-0800200C9A66", "database_id": "74D93920-ED26-11E3-AC10-0800200C9A66"}, false},
+		{"valid", nil, false},
+		{"unknown auth", map[string]interface{}{"auth_method": "74D93920-ED26-11E3-AC10-0800200C9A66"}, false},
+		{"unknown mode", map[string]interface{}{"iam_bootstrap_mode": "74D93920-ED26-11E3-AC10-0800200C9A66"}, false},
+		{"unknown", map[string]interface{}{"service_account_id": "74D93920-ED26-11E3-AC10-0800200C9A66", "database_id": "74D93920-ED26-11E3-AC10-0800200C9A66"}, false},
 		{"missing SA", map[string]interface{}{"service_account_id": ""}, true},
 		{"explicit caller path", map[string]interface{}{"initial_token_secret_path": "tmp"}, true},
 		{"existing missing path", map[string]interface{}{"iam_bootstrap_mode": "EXISTING_SECRET"}, true},
@@ -56,6 +62,7 @@ func TestIAMResourceSchemaAndDiff(t *testing.T) {
 		require.True(t, DataSourceSchema()[k].Computed)
 	}
 }
+
 func TestIAMResourceComputedCloudID(t *testing.T) {
 	r := testResource()
 	cfg := iamConfig()
@@ -83,6 +90,7 @@ func TestIAMResourceComputedCloudID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, diff.Empty(), "observed temporary secret must not create drift")
 }
+
 func TestIAMCanonicalSecretDiff(t *testing.T) {
 	r := testResource()
 	cfg := iamConfig()
@@ -133,4 +141,17 @@ func TestIAMTransitionClearsComputedMetadata(t *testing.T) {
 	delete(cfg, "iam_bootstrap_mode")
 	_, err := iamDiff(r, d.State(), cfg)
 	require.NoError(t, err)
+}
+
+func TestObjectStorageTLSConfigurationAfterRefresh(t *testing.T) {
+	r := testResource()
+	cfg := map[string]interface{}{"connection_string": "grpc://localhost:2136/?database=/owner", "path": "eds", "source_type": "ObjectStorage", "location": "bucket", "auth_method": "NONE"}
+	d := schema.TestResourceDataRaw(t, r.Schema, cfg)
+	d.SetId("grpc://localhost:2136/?database=/owner?path=eds")
+	require.NoError(t, d.Set("use_tls", false))
+	_, err := iamDiff(r, d.State(), cfg)
+	require.NoError(t, err)
+	cfg["use_tls"] = false
+	_, err = iamDiff(r, d.State(), cfg)
+	require.ErrorContains(t, err, "USE_TLS is not supported")
 }

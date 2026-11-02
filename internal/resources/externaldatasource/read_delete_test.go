@@ -9,9 +9,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/require"
-	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
 )
 
 // Client initialization failures can contain the token even before SQL is sent.

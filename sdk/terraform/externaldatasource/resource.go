@@ -404,7 +404,7 @@ func CustomizeDiff(_ context.Context, d *schema.ResourceDiff, _ interface{}) err
 	return externaldatasource.CustomizeDiff(d)
 }
 
-func secretPathDiffSuppress(_ string, old, new string, d *schema.ResourceData) bool {
+func secretPathDiffSuppress(_ string, old, next string, d *schema.ResourceData) bool {
 	endpoint, err := url.Parse(d.Get("connection_string").(string))
 	if err != nil {
 		return false
@@ -419,5 +419,5 @@ func secretPathDiffSuppress(_ string, old, new string, d *schema.ResourceData) b
 		}
 		return path.Join(base, v)
 	}
-	return canonical(old) == canonical(new)
+	return canonical(old) == canonical(next)
 }

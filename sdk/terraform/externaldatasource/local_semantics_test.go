@@ -2,13 +2,14 @@ package externaldatasource
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // The break caught here is relying on SetId + Error to preserve an untainted EDS.
@@ -21,7 +22,7 @@ func TestLocalTerraformIAMCreateErrorTaints(t *testing.T) {
 	dir := t.TempDir()
 	plugins := filepath.Join(dir, "plugins")
 	bin := filepath.Join(plugins, "registry.terraform.io", "example", "test", "0.0.1", runtime.GOOS+"_"+runtime.GOARCH, "terraform-provider-test_v0.0.1")
-	require.NoError(t, os.MkdirAll(filepath.Dir(bin), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Dir(bin), 0o700))
 	buildOut, err := exec.Command("go", "build", "-o", bin, "./testdata/error-provider").CombinedOutput()
 	require.NoError(t, err, string(buildOut))
 	run := func(args ...string) (string, error) {
@@ -37,7 +38,7 @@ func TestLocalTerraformIAMCreateErrorTaints(t *testing.T) {
  }
 }
 resource "test_eds" "example" { path = "eds" }
-`), 0600))
+`), 0o600))
 	out, err := run("init", "-plugin-dir="+plugins, "-no-color")
 	require.NoError(t, err, out)
 	out, err = run("apply", "-auto-approve", "-no-color")

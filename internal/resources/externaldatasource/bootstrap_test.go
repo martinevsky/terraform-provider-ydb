@@ -4,17 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/require"
-	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
 	"github.com/ydb-platform/ydb-go-sdk/v3/query"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
+
+	"github.com/ydb-platform/terraform-provider-ydb/sdk/terraform/auth"
 )
 
 type fakeBackend struct {
@@ -32,6 +34,7 @@ func (f *fakeBackend) Exec(ctx context.Context, q string, opts ...query.ExecuteO
 	}
 	return nil
 }
+
 func (f *fakeBackend) Describe(context.Context, string) (options.ExternalDataSourceDescription, error) {
 	return f.desc, f.describeErr
 }
@@ -45,6 +48,7 @@ func bootstrapData(t *testing.T) *schema.ResourceData {
 	}
 	return schema.TestResourceDataRaw(t, s, map[string]interface{}{"connection_string": "grpc://localhost:2136/?database=/owner", "path": "eds", "source_type": "Ydb", "location": "target:2135", "auth_method": "IAM", "service_account_id": "runtime-sa", "database_id": "target", "iam_bootstrap_mode": "CALLER_TOKEN", "use_tls": false})
 }
+
 func bootstrapHandler(f *fakeBackend) *Handler {
 	h := NewHandlerWithCallerAuth(auth.YdbCredentials{Token: "transport"}, func(context.Context) (auth.YdbCredentials, error) {
 		return auth.YdbCredentials{Token: "SENTINEL-caller-'\\\n"}, nil
@@ -53,6 +57,7 @@ func bootstrapHandler(f *fakeBackend) *Handler {
 	h.uniqueName = func() string { return "__tf_iam_bootstrap_unique" }
 	return h
 }
+
 func iamDescription() options.ExternalDataSourceDescription {
 	return options.ExternalDataSourceDescription{SourceType: "Ydb", Location: "target:2135", Properties: map[string]string{"AUTH_METHOD": "IAM", "SERVICE_ACCOUNT_ID": "runtime-sa", "DATABASE_ID": "target", "INITIAL_TOKEN_SECRET_PATH": "/owner/__tf_iam_bootstrap_unique", "RESOURCE_ID": "target-cloud", "USE_TLS": "FALSE"}}
 }
@@ -74,6 +79,7 @@ func TestYDBIAMBootstrapSequence(t *testing.T) {
 	require.Equal(t, "", d.Get("pending_cleanup_path"))
 	require.False(t, strings.Contains(strings.Join(f.queries, "\n"), "SENTINEL"), "SQL exposed bootstrap token")
 }
+
 func TestYDBIAMApplyValidation(t *testing.T) {
 	f := &fakeBackend{}
 	h := bootstrapHandler(f)
@@ -83,6 +89,7 @@ func TestYDBIAMApplyValidation(t *testing.T) {
 	require.True(t, diags.HasError())
 	require.Empty(t, f.queries)
 }
+
 func TestYDBIAMBootstrapTerminalCleanup(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
@@ -142,6 +149,7 @@ func TestYDBIAMBootstrapCleanupRetry(t *testing.T) {
 		require.True(t, strings.HasPrefix(q, "DROP SECRET"), q)
 	}
 }
+
 func TestYDBIAMBootstrapCollisionAndUpdate(t *testing.T) {
 	f := &fakeBackend{desc: iamDescription()}
 	names := []string{"collision", "owned-one", "owned-two"}
@@ -166,9 +174,12 @@ func TestYDBIAMBootstrapCollisionAndUpdate(t *testing.T) {
 		require.NotContains(t, q, "ALTER SECRET")
 	}
 }
+
+type traceKey struct{}
+
 func TestYDBIAMBootstrapCancellation(t *testing.T) {
 	f := &fakeBackend{desc: iamDescription()}
-	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), "trace", "retained"))
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), traceKey{}, "retained"))
 	defer cancel()
 	f.exec = func(c context.Context, q string, _ []query.ExecuteOption) error {
 		if strings.Contains(q, "EXTERNAL DATA SOURCE") {
@@ -178,7 +189,7 @@ func TestYDBIAMBootstrapCancellation(t *testing.T) {
 			require.NoError(t, c.Err())
 			_, ok := c.Deadline()
 			require.True(t, ok)
-			require.Equal(t, "retained", c.Value("trace"))
+			require.Equal(t, "retained", c.Value(traceKey{}))
 		}
 		return nil
 	}
@@ -195,6 +206,7 @@ func TestYDBIAMBootstrapCancellation(t *testing.T) {
 	require.True(t, h.Create(ctx, d, nil).HasError())
 	require.Empty(t, f.queries)
 }
+
 func TestYDBIAMBootstrapUnknownOutcomes(t *testing.T) {
 	for _, phase := range []string{"secret", "create EDS", "update EDS"} {
 		t.Run(phase, func(t *testing.T) {
@@ -228,6 +240,7 @@ func TestYDBIAMBootstrapUnknownOutcomes(t *testing.T) {
 		})
 	}
 }
+
 func TestYDBIAMBootstrapNoSensitiveOutput(t *testing.T) {
 	const token = "SENTINEL-caller-'\\\n"
 	for _, phase := range []string{"token", "secret", "mutation", "cleanup", "read"} {
@@ -255,6 +268,7 @@ func TestYDBIAMBootstrapNoSensitiveOutput(t *testing.T) {
 		})
 	}
 }
+
 func TestYDBIAMBootstrapExternalAndImport(t *testing.T) {
 	f := &fakeBackend{desc: iamDescription()}
 	h := bootstrapHandler(f)
@@ -276,6 +290,7 @@ func TestYDBIAMBootstrapExternalAndImport(t *testing.T) {
 	require.Equal(t, "EXISTING_SECRET", d.Get("iam_bootstrap_mode"))
 	require.Len(t, f.queries, before)
 }
+
 func TestYDBIAMBootstrapFailedCreateCleanupOrphan(t *testing.T) {
 	f := &fakeBackend{}
 	f.exec = func(_ context.Context, q string, _ []query.ExecuteOption) error {
@@ -311,6 +326,7 @@ func TestYDBIAMBootstrapCleanupDeadline(t *testing.T) {
 	require.NotEmpty(t, d.Get("pending_cleanup_path"))
 	require.Less(t, time.Since(started), time.Second)
 }
+
 func TestYDBIAMBootstrapConcurrentPaths(t *testing.T) {
 	results := make(chan bootstrapResult, 2)
 	for i := 0; i < 2; i++ {
@@ -325,4 +341,37 @@ func TestYDBIAMBootstrapConcurrentPaths(t *testing.T) {
 	require.Equal(t, terminalSuccess, first.outcome)
 	require.Equal(t, terminalSuccess, second.outcome)
 	require.NotEqual(t, first.path, second.path)
+}
+
+func TestMissingCallerTokenDiagnostic(t *testing.T) {
+	f := &fakeBackend{}
+	h := bootstrapHandler(f)
+	h.callerAuth = func(context.Context) (auth.YdbCredentials, error) { return auth.YdbCredentials{}, nil }
+	diags := h.Create(context.Background(), bootstrapData(t), nil)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags[0].Summary, "caller IAM token required")
+	require.Empty(t, f.queries)
+}
+
+func TestExistingSecretUnknownUpdateBlocksFurtherOperations(t *testing.T) {
+	f := &fakeBackend{desc: iamDescription()}
+	f.exec = func(_ context.Context, q string, _ []query.ExecuteOption) error {
+		if strings.Contains(q, "EXTERNAL DATA SOURCE") {
+			return status.Error(codes.DeadlineExceeded, "response lost")
+		}
+		return nil
+	}
+	h := bootstrapHandler(f)
+	d := bootstrapData(t)
+	d.SetId("grpc://localhost:2136/?database=/owner?path=eds")
+	require.NoError(t, d.Set("iam_bootstrap_mode", "EXISTING_SECRET"))
+	require.NoError(t, d.Set("initial_token_secret_path", "/owner/existing"))
+	require.True(t, h.Update(context.Background(), d, nil).HasError())
+	require.Equal(t, "UNKNOWN", d.Get("pending_iam_mutation"))
+	require.Empty(t, d.Get("pending_cleanup_path"))
+	before := len(f.queries)
+	require.True(t, h.Read(context.Background(), d, nil).HasError())
+	require.True(t, h.Update(context.Background(), d, nil).HasError())
+	require.True(t, h.Delete(context.Background(), d, nil).HasError())
+	require.Len(t, f.queries, before)
 }

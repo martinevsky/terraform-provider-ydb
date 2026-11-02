@@ -39,7 +39,7 @@ func TestLocalTerraformYDBLegacyProviderUpgradeDowngrade(t *testing.T) {
 	require.NoError(t, err, string(buildOutput))
 	var out string
 	plugins := filepath.Join(dir, "provider")
-	require.NoError(t, os.MkdirAll(plugins, 0700))
+	require.NoError(t, os.MkdirAll(plugins, 0o700))
 	active := filepath.Join(plugins, "terraform-provider-ydb")
 	cli := filepath.Join(dir, "terraform.tfrc")
 	require.NoError(t, os.WriteFile(cli, []byte(fmt.Sprintf(`provider_installation {
@@ -48,7 +48,7 @@ func TestLocalTerraformYDBLegacyProviderUpgradeDowngrade(t *testing.T) {
  }
  direct {}
 }
-`, plugins)), 0600))
+`, plugins)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte(fmt.Sprintf(`terraform {
  required_providers {
   ydb = { source = "terraform.storage.ydb.tech/provider/ydb" }
@@ -69,11 +69,13 @@ resource "ydb_secret" "legacy" {
  name = "legacy-secret"
  value = "legacy-public-fixture"
 }
-`, f.addr, f.addr)), 0600))
+`, f.addr, f.addr)), 0o600))
 	switchProvider := func(binary string) { _ = os.Remove(active); require.NoError(t, os.Symlink(binary, active)) }
 	run := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// Arguments are fixed Terraform subcommands supplied by this test.
+		//nolint:gosec // The executable is resolved locally and arguments are test-controlled.
 		cmd := exec.CommandContext(ctx, tf, args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "TF_CLI_CONFIG_FILE="+cli, "CHECKPOINT_DISABLE=1", "TF_IN_AUTOMATION=1", "TF_LOG=OFF", "TF_LOG_SDK=OFF")

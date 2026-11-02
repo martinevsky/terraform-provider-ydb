@@ -59,6 +59,9 @@ func TestLocalTerraformYDBIAMRecovery(t *testing.T) {
 	start := func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		config, ch, e := plugin.DebugServe(ctx, &plugin.ServeOpts{ProviderFunc: factory, ProviderAddr: address, Logger: hclog.NewNullLogger(), NoLogOutputOverride: true})
+		if e != nil {
+			cancel()
+		}
 		require.NoError(t, e)
 		b, e := json.Marshal(map[string]plugin.ReattachConfig{address: config})
 		require.NoError(t, e)
@@ -78,10 +81,11 @@ func TestLocalTerraformYDBIAMRecovery(t *testing.T) {
 	dir := t.TempDir()
 	plugins := filepath.Join(dir, "plugins")
 	binary := filepath.Join(plugins, address, "0.0.1", runtime.GOOS+"_"+runtime.GOARCH, "terraform-provider-test_v0.0.1")
-	require.NoError(t, os.MkdirAll(filepath.Dir(binary), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Dir(binary), 0o700))
 	// Init needs a package for its lockfile; TF_REATTACH_PROVIDERS runs the real
 	// factory server above. The placeholder must never execute.
-	require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\nexit 91\n"), 0700))
+	require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\nexit 91\n"), 0o600))
+	require.NoError(t, os.Chmod(binary, 0o700))
 	run := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -113,7 +117,7 @@ resource "test_eds" "example" {
 resource "test_external_table" "dependent" {
  data_source = test_eds.example.id
 }
-`, f.addr, location, mode)), 0600))
+`, f.addr, location, mode)), 0o600))
 	}
 	state := func() map[string]interface{} {
 		raw, e := os.ReadFile(filepath.Join(dir, "terraform.tfstate"))

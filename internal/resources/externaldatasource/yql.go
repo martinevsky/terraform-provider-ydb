@@ -1,8 +1,9 @@
 package externaldatasource
 
 import (
-	"github.com/ydb-platform/terraform-provider-ydb/internal/helpers"
 	"strings"
+
+	"github.com/ydb-platform/terraform-provider-ydb/internal/helpers"
 )
 
 type withParam struct {

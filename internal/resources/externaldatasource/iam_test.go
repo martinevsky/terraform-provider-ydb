@@ -1,10 +1,12 @@
 package externaldatasource
 
 import (
+	"testing"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/require"
+
 	"github.com/ydb-platform/terraform-provider-ydb/internal/helpers"
-	"testing"
 )
 
 func TestIAMAuthValidation(t *testing.T) {
