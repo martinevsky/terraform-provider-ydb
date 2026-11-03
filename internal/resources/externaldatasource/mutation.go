@@ -65,7 +65,7 @@ func (h *Handler) mutate(ctx context.Context, d *schema.ResourceData, kind mutat
 	if iam && r.strAttr("iam_bootstrap_mode") != "EXISTING_SECRET" {
 		result = h.bootstrap(ctx, endpoint, databaseURL.Query().Get("database"), b, mutate)
 	} else {
-		result = bootstrapResult{mutationResult: mutate("")}
+		result = bootstrapResult{mutationResult: mutate(""), stage: edsStage}
 	}
 	if result.outcome != terminalSuccess {
 		return mutationDiagnostics(d, kind, iam, result)
@@ -118,7 +118,7 @@ func mutationDiagnostics(d *schema.ResourceData, kind mutationKind, iam bool, re
 		if result.owned && (result.cleanupErr != nil || result.outcome == unknownOutcome) {
 			_ = d.Set("pending_cleanup_path", result.path)
 		}
-		if result.outcome == unknownOutcome {
+		if result.outcome == unknownOutcome && result.stage == edsStage {
 			_ = d.Set("pending_iam_mutation", "UNKNOWN")
 		}
 	}

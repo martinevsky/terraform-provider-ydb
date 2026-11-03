@@ -380,3 +380,24 @@ func TestExistingSecretUnknownUpdateBlocksFurtherOperations(t *testing.T) {
 	require.True(t, h.Delete(context.Background(), d, nil).HasError())
 	require.Len(t, f.queries, before)
 }
+
+func TestUnknownSecretCreateDuringUpdateDoesNotBlockEDS(t *testing.T) {
+	f := &fakeBackend{desc: iamDescription()}
+	f.exec = func(_ context.Context, q string, _ []query.ExecuteOption) error {
+		if strings.Contains(q, "CREATE SECRET") {
+			return status.Error(codes.DeadlineExceeded, "response lost")
+		}
+		return nil
+	}
+	h := bootstrapHandler(f)
+	d := bootstrapData(t)
+	d.SetId("grpc://localhost:2136/?database=/owner?path=eds")
+	diags := h.Update(context.Background(), d, nil)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags[0].Summary, "Secret CREATE was not acknowledged")
+	require.NotContains(t, diags[0].Summary, "EDS mutation outcome is unknown")
+	require.Empty(t, d.Get("pending_iam_mutation"))
+	require.Empty(t, d.Get("pending_cleanup_path"))
+	require.Len(t, f.queries, 1)
+	require.False(t, h.Read(context.Background(), d, nil).HasError())
+}

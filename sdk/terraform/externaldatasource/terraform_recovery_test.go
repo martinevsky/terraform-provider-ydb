@@ -111,9 +111,9 @@ resource "test_external_table" "dependent" {
 	state := func() map[string]interface{} {
 		raw, e := os.ReadFile(filepath.Join(dir, "terraform.tfstate"))
 		require.NoError(t, e)
-		require.False(t, strings.Contains(string(raw), wireToken), "token leaked into persisted state")
 		var doc map[string]interface{}
 		require.NoError(t, json.Unmarshal(raw, &doc))
+		require.False(t, containsStringValue(doc, wireToken), "token leaked into persisted state")
 		for _, v := range doc["resources"].([]interface{}) {
 			resource := v.(map[string]interface{})
 			if resource["type"] == "test_eds" {
@@ -216,4 +216,33 @@ resource "test_external_table" "dependent" {
 	require.False(t, f.exists)
 	require.True(t, f.parameterOK)
 	f.mu.Unlock()
+}
+
+func containsStringValue(value interface{}, needle string) bool {
+	switch v := value.(type) {
+	case string:
+		return strings.Contains(v, needle)
+	case []interface{}:
+		for _, item := range v {
+			if containsStringValue(item, needle) {
+				return true
+			}
+		}
+	case map[string]interface{}:
+		for key, item := range v {
+			if strings.Contains(key, needle) || containsStringValue(item, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestStateTokenDetectionHandlesJSONEscaping(t *testing.T) {
+	raw, err := json.Marshal(map[string]interface{}{"resources": []interface{}{map[string]interface{}{"value": wireToken}}})
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), wireToken)
+	var state interface{}
+	require.NoError(t, json.Unmarshal(raw, &state))
+	require.True(t, containsStringValue(state, wireToken))
 }

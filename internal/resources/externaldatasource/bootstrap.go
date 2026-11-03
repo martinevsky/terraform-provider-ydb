@@ -32,8 +32,16 @@ type mutationResult struct {
 	outcome mutationOutcome
 	err     error
 }
+type bootstrapStage uint8
+
+const (
+	secretStage bootstrapStage = iota
+	edsStage
+)
+
 type bootstrapResult struct {
 	mutationResult
+	stage      bootstrapStage
 	path       string
 	owned      bool
 	cleanupErr error
@@ -180,7 +188,7 @@ func (h *Handler) bootstrap(ctx context.Context, endpoint, root string, b backen
 		}
 		return bootstrapResult{mutationResult: result, path: p}
 	}
-	result := bootstrapResult{mutationResult: mutation(p), path: p, owned: true}
+	result := bootstrapResult{mutationResult: mutation(p), stage: edsStage, path: p, owned: true}
 	if result.outcome == unknownOutcome {
 		return result
 	}
@@ -212,7 +220,11 @@ func bootstrapDiagnostics(result bootstrapResult) diag.Diagnostics {
 	}
 	detail := "EDS mutation failed: " + safeStatus(result.err)
 	if result.outcome == unknownOutcome {
-		detail = "EDS mutation outcome is unknown: " + safeStatus(result.err) + ". Reconcile server-side execution; an equal Describe does not establish Create ownership. Import only after verifying ownership"
+		if result.stage == edsStage {
+			detail = "EDS mutation outcome is unknown: " + safeStatus(result.err) + ". Reconcile server-side execution; an equal Describe does not establish Create ownership. Import only after verifying ownership"
+		} else {
+			detail = "Secret CREATE outcome is unknown: " + safeStatus(result.err) + ". EDS mutation was not submitted"
+		}
 	}
 	if result.path != "" && !result.owned {
 		detail += ". Secret CREATE was not acknowledged; ownership of path " + fmt.Sprintf("%q", result.path) + " is unconfirmed. Do not delete it without independent ownership evidence"
