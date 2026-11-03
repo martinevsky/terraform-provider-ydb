@@ -2,6 +2,9 @@ package externaldatasource
 
 import (
 	"context"
+	"net/url"
+	"path"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -17,10 +20,10 @@ func ResourceCreateFunc(cb auth.GetAuthCallback) helpers.TerraformCRUD {
 		authCreds, err := cb(ctx)
 		if err != nil {
 			return diag.Diagnostics{
-				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: err.Error()},
+				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: "Caller credentials are unavailable; credential error details are omitted to protect secrets."},
 			}
 		}
-		h := externaldatasource.NewHandler(authCreds)
+		h := externaldatasource.NewHandlerWithCallerAuth(authCreds, cb)
 		return h.Create(ctx, d, meta)
 	}
 }
@@ -30,10 +33,10 @@ func ResourceReadFunc(cb auth.GetAuthCallback) helpers.TerraformCRUD {
 		authCreds, err := cb(ctx)
 		if err != nil {
 			return diag.Diagnostics{
-				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: err.Error()},
+				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: "Caller credentials are unavailable; credential error details are omitted to protect secrets."},
 			}
 		}
-		h := externaldatasource.NewHandler(authCreds)
+		h := externaldatasource.NewHandlerWithCallerAuth(authCreds, cb)
 		return h.Read(ctx, d, meta)
 	}
 }
@@ -43,10 +46,10 @@ func DataSourceReadFunc(cb auth.GetAuthCallback) helpers.TerraformCRUD {
 		authCreds, err := cb(ctx)
 		if err != nil {
 			return diag.Diagnostics{
-				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: err.Error()},
+				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: "Caller credentials are unavailable; credential error details are omitted to protect secrets."},
 			}
 		}
-		h := externaldatasource.NewHandler(authCreds)
+		h := externaldatasource.NewHandlerWithCallerAuth(authCreds, cb)
 		return h.DataSourceRead(ctx, d, meta)
 	}
 }
@@ -56,10 +59,10 @@ func ResourceUpdateFunc(cb auth.GetAuthCallback) helpers.TerraformCRUD {
 		authCreds, err := cb(ctx)
 		if err != nil {
 			return diag.Diagnostics{
-				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: err.Error()},
+				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: "Caller credentials are unavailable; credential error details are omitted to protect secrets."},
 			}
 		}
-		h := externaldatasource.NewHandler(authCreds)
+		h := externaldatasource.NewHandlerWithCallerAuth(authCreds, cb)
 		return h.Update(ctx, d, meta)
 	}
 }
@@ -69,10 +72,10 @@ func ResourceDeleteFunc(cb auth.GetAuthCallback) helpers.TerraformCRUD {
 		authCreds, err := cb(ctx)
 		if err != nil {
 			return diag.Diagnostics{
-				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: err.Error()},
+				{Severity: diag.Error, Summary: "failed to create token for YDB request", Detail: "Caller credentials are unavailable; credential error details are omitted to protect secrets."},
 			}
 		}
-		h := externaldatasource.NewHandler(authCreds)
+		h := externaldatasource.NewHandlerWithCallerAuth(authCreds, cb)
 		return h.Delete(ctx, d, meta)
 	}
 }
@@ -85,7 +88,7 @@ var (
 		"Oracle", "Logging", "Solomon", "Redis",
 		"Prometheus", "MongoDB", "OpenSearch", "YdbTopics",
 	}
-	externalDataSourceAuthMethods = []string{"NONE", "BASIC", "MDB_BASIC", "AWS", "TOKEN", "SERVICE_ACCOUNT"}
+	externalDataSourceAuthMethods = []string{"NONE", "BASIC", "MDB_BASIC", "AWS", "TOKEN", "SERVICE_ACCOUNT", "IAM"}
 	externalDataSourceProtocols   = []string{"NATIVE", "HTTP"}
 )
 
@@ -128,10 +131,16 @@ func ResourceSchema() map[string]*schema.Schema {
 		},
 		"auth_method": {
 			Type:             schema.TypeString,
-			Description:      "Authentication method (NONE, BASIC, MDB_BASIC, AWS, TOKEN, SERVICE_ACCOUNT).",
+			Description:      "Authentication method (NONE, BASIC, MDB_BASIC, AWS, TOKEN, SERVICE_ACCOUNT, IAM).",
 			Optional:         true,
 			ValidateDiagFunc: optionalEnum(externalDataSourceAuthMethods),
 		},
+
+		"iam_bootstrap_mode":        {Type: schema.TypeString, Optional: true, Computed: true, Description: "IAM bootstrap mode: CALLER_TOKEN (new resources) or EXISTING_SECRET (imports).", ValidateDiagFunc: optionalEnum([]string{"CALLER_TOKEN", "EXISTING_SECRET"})},
+		"initial_token_secret_path": {Type: schema.TypeString, Optional: true, Computed: true, Description: "Initial IAM secret path. In CALLER_TOKEN mode this is observed metadata; the temporary secret is removed after mutation.", DiffSuppressFunc: secretPathDiffSuppress},
+		"resource_id":               {Type: schema.TypeString, Optional: true, Computed: true, Description: "Target cloud ID, resolved by YDB unless explicitly supplied."},
+		"pending_iam_mutation":      {Type: schema.TypeString, Computed: true, Description: "UNKNOWN when a previously owned EDS mutation may still require its temporary secret; manual reconciliation is required."},
+		"pending_cleanup_path":      {Type: schema.TypeString, Computed: true, Description: "Confirmed-owned temporary secret awaiting cleanup; never contains a token."},
 		"login": {
 			Type:        schema.TypeString,
 			Description: "Login for BASIC/MDB_BASIC authentication.",
@@ -273,6 +282,10 @@ func DataSourceSchema() map[string]*schema.Schema {
 			Description: "Authentication method.",
 			Computed:    true,
 		},
+
+		"iam_bootstrap_mode":        {Type: schema.TypeString, Computed: true, Description: "Observed IAM bootstrap mode."},
+		"initial_token_secret_path": {Type: schema.TypeString, Computed: true, Description: "Observed initial IAM secret path; its object may already be absent."},
+		"resource_id":               {Type: schema.TypeString, Computed: true, Description: "Target cloud ID."},
 		"login": {
 			Type:        schema.TypeString,
 			Description: "Login.",
@@ -384,4 +397,27 @@ func DataSourceSchema() map[string]*schema.Schema {
 			Computed:    true,
 		},
 	}
+}
+
+// CustomizeDiff must be installed by providers wrapping the shared EDS schema.
+func CustomizeDiff(_ context.Context, d *schema.ResourceDiff, _ interface{}) error {
+	return externaldatasource.CustomizeDiff(d)
+}
+
+func secretPathDiffSuppress(_ string, old, next string, d *schema.ResourceData) bool {
+	endpoint, err := url.Parse(d.Get("connection_string").(string))
+	if err != nil {
+		return false
+	}
+	base := endpoint.Query().Get("database")
+	canonical := func(v string) string {
+		if v == "" {
+			return ""
+		}
+		if strings.HasPrefix(v, "/") {
+			return path.Clean(v)
+		}
+		return path.Join(base, v)
+	}
+	return canonical(old) == canonical(next)
 }
